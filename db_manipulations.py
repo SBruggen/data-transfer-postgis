@@ -101,7 +101,7 @@ def insert_data_into_destination(conn, table_name, columns, data):
         );
     """)'''
 
-def create_table_if_not_exists(cursor, schema, table_name, columns_dict):
+'''def create_table_if_not_exists(cursor, schema, table_name, columns_dict):
     """Create a table with given specifications if it does not exist.
 
     Args:
@@ -125,7 +125,173 @@ def create_table_if_not_exists(cursor, schema, table_name, columns_dict):
         cursor.execute(sql_query)
         print(f"Table '{full_table_name}' created or already exists.")
     except Exception as e:
-        print(f"Failed to create table {full_table_name}: {e}")
+        print(f"Failed to create table {full_table_name}: {e}")'''
+
+
+def check_table_exists(cursor, schema, table_name):
+    """Check if a table exists in the given schema."""
+    cursor.execute("""
+        SELECT EXISTS (
+            SELECT 1 
+            FROM information_schema.tables 
+            WHERE table_schema = %s AND table_name = %s
+        );
+    """, (schema, table_name))
+    return cursor.fetchone()[0]
+
+
+def check_table_structure(cursor, schema, table_name, columns_dict):
+    """Check the existing table structure and compare it with the expected columns_dict."""
+    full_table_name = f"{schema}.{table_name}".lower()
+    cursor.execute("""
+        SELECT column_name, udt_name, data_type
+        FROM information_schema.columns 
+        WHERE table_schema = %s AND table_name = %s
+    """, (schema.lower(), table_name.lower()))
+    existing_columns = {row[0].lower(): (row[1].upper(), row[2].upper()) for row in cursor.fetchall()}
+
+    # Print the actual structure fetched from the database
+    print(f"\nActual structure of {full_table_name}:")
+    for col, (udt_name, data_type) in existing_columns.items():
+        print(f"  {col}: {data_type} ({udt_name})")
+
+    # Normalize data types in expected_columns to be all uppercase for comparison
+    expected_columns = {col_name.lower(): col_type.upper() for col_name, col_type in columns_dict.items()}
+
+    # Print the expected structure from the input dictionary
+    print(f"\nExpected structure for {full_table_name}:")
+    for col, col_type in expected_columns.items():
+        print(f"  {col}: {col_type}")
+
+    # Check for mismatches
+    mismatches = {}
+    for col, (udt_name, data_type) in existing_columns.items():
+        expected_type = expected_columns.get(col)
+        if expected_type:
+            # Handling for geometry types and other user-defined types
+            if 'GEOMETRY' in expected_type:
+                expected_geom_type = expected_type.replace("GEOMETRY", "").strip()
+                # If detailed geometry type checks are needed, additional queries to geometry_columns may be added here
+                if data_type != 'USER-DEFINED' or (udt_name != 'GEOMETRY' and not expected_geom_type in udt_name):
+                    mismatches[col] = (expected_type, f"{data_type} ({udt_name})")
+            else:
+                # General type comparison
+                if expected_type.split()[0] != data_type:
+                    mismatches[col] = (expected_type, data_type)
+
+    if mismatches:
+        print("\nExisting table structure does not match the expected structure.")
+        for col, types in mismatches.items():
+            print(f"  Column: {col}, Expected Type: {types[0]}, Found Type: {types[1]}")
+        return False
+    else:
+        print("\nExisting table structure matches the expected structure.")
+        return True
+
+
+
+'''def check_table_structure(cursor, schema, table_name, columns_dict):
+    """Check the existing table structure and compare it with the expected columns_dict.
+        
+        Args:
+        cursor (Cursor): Database cursor.
+        schema (str): Schema of the table.
+        table_name (str): Name of the table to create.
+        columns_dict (dict): Dictionary with column names as keys and data types as values.
+    """
+
+    full_table_name = f"{schema}.{table_name}".lower()
+    try:
+        cursor.execute(f"SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = '{schema}' AND table_name = '{table_name}'")
+        existing_columns = {row[0].upper(): row[1] for row in cursor.fetchall()}  # test different normalization
+        expected_columns = {col_name.lower(): col_type.upper() for col_name, col_type in columns_dict.items()}
+
+        
+        # Check for mismatches
+        mismatches = {}
+        for col, (udt_name, data_type) in existing_columns.items():
+            expected_type = expected_columns.get(col)
+            if expected_type:
+                # Handling for geometry types
+                if 'GEOMETRY' in expected_type:
+                    if data_type != 'USER-DEFINED':
+                        mismatches[col] = (expected_type, data_type)
+                elif expected_type.split()[0] != data_type.upper():
+                    mismatches[col] = (expected_type, data_type)
+            
+        if mismatches:
+            print("Existing table structure does not match the expected structure.")
+            for col, types in mismatches.items():
+                print(f"Column: {col}, Expected Type: {types[0]}, Found Type: {types[1]}")
+            return False
+        else:
+            print("Existing table structure matches the expected structure.")
+            return True
+    except Exception as e:
+        print(f"Error checking table structure: {e}")
+        return False'''
+    
+
+'''def create_table_if_not_exists(cursor, schema, table_name, columns_dict):
+    """Create a table with given specifications if it does not exist or if the structure is different.
+    
+        Args:
+        cursor (Cursor): Database cursor.
+        schema (str): Schema of the table.
+        table_name (str): Name of the table to create.
+        columns_dict (dict): Dictionary with column names as keys and data types as values.
+    """
+
+    full_table_name = f"{schema}.{table_name}"
+    columns = [f"{col_name} {col_type}" for col_name, col_type in columns_dict.items()]
+    columns_str = ", ".join(columns)
+    sql_query = f"CREATE TABLE IF NOT EXISTS {full_table_name} ({columns_str});"
+    
+    # First, check if the table exists and compare structures
+    cursor.execute(f"SELECT to_regclass('{full_table_name}')")
+    if cursor.fetchone()[0]:
+        if not check_table_structure(cursor, schema, table_name, columns_dict):
+            response = input("Do you want to drop and recreate the table? (yes/no): ")
+            if response.lower() in ['yes', 'y', 'ok']:
+                cursor.execute(f"DROP TABLE {full_table_name}")
+                cursor.execute(sql_query)
+                print(f"Table '{full_table_name}' has been recreated.")
+            else:
+                print("Table recreation aborted.")
+        else:
+            print(f"Table '{full_table_name}' already exists with the correct structure.")
+    else:
+        print("Executing SQL:", sql_query)
+        cursor.execute(sql_query)
+        print(f"Table '{full_table_name}' created successfully.")'''
+
+def create_table_if_not_exists(cursor, schema, table_name, columns_dict):
+    """Create a table with given specifications if it does not exist or if the structure is different."""
+    full_table_name = f"{schema}.{table_name}"
+
+    if check_table_exists(cursor, schema, table_name):
+        if not check_table_structure(cursor, schema, table_name, columns_dict):
+            response = input("Do you want to drop and recreate the table? (yes/no): ")
+            if response.lower() == 'yes':
+                cursor.execute(f"DROP TABLE {full_table_name}")
+                create_table(cursor, schema, table_name, columns_dict)
+            else:
+                print("Table recreation aborted.")
+        else:
+            print(f"Table '{full_table_name}' already exists with the correct structure.")
+    else:
+        create_table(cursor, schema, table_name, columns_dict)
+
+
+def create_table(cursor, schema, table_name, columns_dict):
+    """Creates a table based on the specified columns dictionary."""
+    columns = [f"{col_name} {col_type}" for col_name, col_type in columns_dict.items()]
+    columns_str = ", ".join(columns)
+    sql_query = f"CREATE TABLE {schema}.{table_name} ({columns_str});"
+    print("Executing SQL:", sql_query)
+    cursor.execute(sql_query)
+    print(f"Table '{schema}.{table_name}' created successfully.")
+
 
 def get_user_input_for_columns():
     columns_dict = {}
