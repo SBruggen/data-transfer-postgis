@@ -33,7 +33,7 @@ def create_table_from_json(cursor, json_path):
     return schema['columns']
 
 
-def fetch_data_from_source(conn, table_name, columns):
+def fetch_data_from_source(conn, schema, table_name, columns):
     """
     Fetch data from a specified table and columns.
     
@@ -47,8 +47,10 @@ def fetch_data_from_source(conn, table_name, columns):
     """
     cursor = conn.cursor()
     try:
-        column_string = ', '.join([str(column) for column in columns])  # Construct column part of the query
-        query = f"SELECT {column_string} FROM {table_name}"
+        # Normalize column names to lowercase
+        columns = [col[0].lower() for col in columns]
+        column_string =  ', '.join(columns)  # Construct column part of the query
+        query = f"SELECT {column_string} FROM {schema}.{table_name}"
         print("Executing SQL:", query)
         cursor.execute(query)
         rows = cursor.fetchall()
@@ -62,7 +64,7 @@ def fetch_data_from_source(conn, table_name, columns):
 
 ### create tables and insert data functions
 
-def insert_data_into_destination(conn, table_name, columns, data):
+def insert_data_into_destination(conn, schema, table_name, columns, data):
     """
     Insert data into a specified table in the destination database.
     
@@ -74,9 +76,11 @@ def insert_data_into_destination(conn, table_name, columns, data):
     """
     cursor = conn.cursor()
     try:
-        column_string = ', '.join([str(column) for column in columns])  # Columns for INSERT INTO
+        # Normalize column names to lowercase
+        columns = [col[0].lower() for col in columns]
+        column_string = ', '.join(columns)  # Columns for INSERT INTO
         placeholders = ', '.join(['%s'] * len(columns))  # Placeholder %s for each column
-        query = f"INSERT INTO {table_name} ({column_string}) VALUES ({placeholders})"
+        query = f"INSERT INTO {schema}.{table_name} ({column_string}) VALUES ({placeholders})"
         print("Executing SQL:", query)
         cursor.executemany(query, data)
         conn.commit()
@@ -86,46 +90,6 @@ def insert_data_into_destination(conn, table_name, columns, data):
         print(f"An error occurred while inserting data: {e}")
     finally:
         cursor.close()
-
-'''def create_table_if_not_exists(cursor):
-    """Create the table if it does not exist.
-    Not definitive version yet    
-        """
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS public.elementen_aed (
-            Id INTEGER PRIMARY KEY,
-            Naam TEXT,
-            Adres TEXT,
-            opmerkingen TEXT
-            geometry GEOMETRY(MULTIPOINT)
-        );
-    """)'''
-
-'''def create_table_if_not_exists(cursor, schema, table_name, columns_dict):
-    """Create a table with given specifications if it does not exist.
-
-    Args:
-        cursor (Cursor): Database cursor.
-        schema (str): Schema of the table.
-        table_name (str): Name of the table to create.
-        columns_dict (dict): Dictionary with column names as keys and data types as values.
-    """
-
-    # Ensure PostGIS is enabled before attempting to create a table with geometry types
-    #enable_postgis(cursor)
-
-    full_table_name = f"{schema}.{table_name}"  # Combining schema and table name
-    columns = []
-    for col_name, col_type in columns_dict.items():
-        columns.append(f"{col_name} {col_type}")
-    columns_str = ", ".join(columns)
-    sql_query = f"CREATE TABLE IF NOT EXISTS {full_table_name} ({columns_str});"
-    try:
-        print("Executing SQL:", sql_query)
-        cursor.execute(sql_query)
-        print(f"Table '{full_table_name}' created or already exists.")
-    except Exception as e:
-        print(f"Failed to create table {full_table_name}: {e}")'''
 
 
 def check_table_exists(cursor, schema, table_name):
@@ -189,82 +153,6 @@ def check_table_structure(cursor, schema, table_name, columns_dict):
         return True
 
 
-
-'''def check_table_structure(cursor, schema, table_name, columns_dict):
-    """Check the existing table structure and compare it with the expected columns_dict.
-        
-        Args:
-        cursor (Cursor): Database cursor.
-        schema (str): Schema of the table.
-        table_name (str): Name of the table to create.
-        columns_dict (dict): Dictionary with column names as keys and data types as values.
-    """
-
-    full_table_name = f"{schema}.{table_name}".lower()
-    try:
-        cursor.execute(f"SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = '{schema}' AND table_name = '{table_name}'")
-        existing_columns = {row[0].upper(): row[1] for row in cursor.fetchall()}  # test different normalization
-        expected_columns = {col_name.lower(): col_type.upper() for col_name, col_type in columns_dict.items()}
-
-        
-        # Check for mismatches
-        mismatches = {}
-        for col, (udt_name, data_type) in existing_columns.items():
-            expected_type = expected_columns.get(col)
-            if expected_type:
-                # Handling for geometry types
-                if 'GEOMETRY' in expected_type:
-                    if data_type != 'USER-DEFINED':
-                        mismatches[col] = (expected_type, data_type)
-                elif expected_type.split()[0] != data_type.upper():
-                    mismatches[col] = (expected_type, data_type)
-            
-        if mismatches:
-            print("Existing table structure does not match the expected structure.")
-            for col, types in mismatches.items():
-                print(f"Column: {col}, Expected Type: {types[0]}, Found Type: {types[1]}")
-            return False
-        else:
-            print("Existing table structure matches the expected structure.")
-            return True
-    except Exception as e:
-        print(f"Error checking table structure: {e}")
-        return False'''
-    
-
-'''def create_table_if_not_exists(cursor, schema, table_name, columns_dict):
-    """Create a table with given specifications if it does not exist or if the structure is different.
-    
-        Args:
-        cursor (Cursor): Database cursor.
-        schema (str): Schema of the table.
-        table_name (str): Name of the table to create.
-        columns_dict (dict): Dictionary with column names as keys and data types as values.
-    """
-
-    full_table_name = f"{schema}.{table_name}"
-    columns = [f"{col_name} {col_type}" for col_name, col_type in columns_dict.items()]
-    columns_str = ", ".join(columns)
-    sql_query = f"CREATE TABLE IF NOT EXISTS {full_table_name} ({columns_str});"
-    
-    # First, check if the table exists and compare structures
-    cursor.execute(f"SELECT to_regclass('{full_table_name}')")
-    if cursor.fetchone()[0]:
-        if not check_table_structure(cursor, schema, table_name, columns_dict):
-            response = input("Do you want to drop and recreate the table? (yes/no): ")
-            if response.lower() in ['yes', 'y', 'ok']:
-                cursor.execute(f"DROP TABLE {full_table_name}")
-                cursor.execute(sql_query)
-                print(f"Table '{full_table_name}' has been recreated.")
-            else:
-                print("Table recreation aborted.")
-        else:
-            print(f"Table '{full_table_name}' already exists with the correct structure.")
-    else:
-        print("Executing SQL:", sql_query)
-        cursor.execute(sql_query)
-        print(f"Table '{full_table_name}' created successfully.")'''
-
 def create_table_if_not_exists(cursor, schema, table_name, columns_dict):
     """Create a table with given specifications if it does not exist or if the structure is different."""
     full_table_name = f"{schema}.{table_name}"
@@ -312,7 +200,7 @@ def get_user_input_for_columns():
             print("No more columns to add. Proceeding to the next step.")
             break
         
-        column_name = input("Enter column name: ")
+        column_name = input("Enter column name: ").lower()  # Convert column name to lowercase
         column_type = input("Enter column type (T for TEXT, I for INTEGER, G for GEOMETRY): ").upper()
 
         if column_type in type_map:

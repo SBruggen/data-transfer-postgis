@@ -61,7 +61,44 @@ def main():
             create_table_if_not_exists(dest_cursor, schema, table_name, columns_dict)
 
             dest_conn.commit()
-        
+
+        # Transfer data
+        while True:
+            add_data = input("Do you want to transfer data from one database to another? (yes/no): ")
+            if add_data not in ['yes', 'y', 'ok']:
+                print("No new data will be transfered between databases.")
+                break
+
+            # Choose method of loading table structure
+            table_input = int(input("Enter the table structure from a json file (1) or from manual input(2): "))
+
+            # Give schema and table name for storing in database
+            source_schema = input("Enter the schema where the data needs to be fetched from within the source database (no defeault): ")
+            source_table_name = input("Enter the name of the table where the data needs to be sourced from (check for correct name in pgAdmin): ")
+            dest_schema = input("Enter the schema where the table will be stored (default 'public'): ") or "public"
+            dest_table_name = input("Enter the name of the table where the data needs to be stored in: ")
+
+            # Select columns for data transfer based on JSON definition
+            if table_input == 1:
+                json_map = input(r"Enter the path to the JSON file with the table definition (map structure, default from desktop\work code\data\tables): ") or r"C:\Users\stijn.bruggen\Desktop\work code\data\tables"
+                json_file = input("Enter the name of the json file with the table definition (.json): ")
+                json_path = os.path.join(json_map, json_file)
+                print(f"Attempting to load data to table {json_path}")
+                columns_dict = create_table_from_json(dest_cursor, json_path)
+
+            # Select columns by manual input
+            elif table_input == 2:
+                columns_dict = get_user_input_for_columns()
+
+            # fetch data from source database
+            columns_list = list(columns_dict.items())
+            data = fetch_data_from_source(source_conn, source_schema, source_table_name, columns_list)
+
+            # isert data into destination database
+            insert_data_into_destination(dest_conn, dest_schema, dest_table_name, columns_list, data)
+
+            dest_conn.commit()
+ 
         # Close the cursors after completing the operations
         source_cursor.close()
         dest_cursor.close()
